@@ -1,0 +1,7 @@
+upsUMa/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+
+# ipython notebooks
+.ipynb_checkpoints/
