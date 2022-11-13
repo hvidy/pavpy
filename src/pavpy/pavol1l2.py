@@ -5,7 +5,8 @@ from matplotlib import pyplot as plt
 
 from .utils import (
 	get_uv,
-	get_diams
+	get_diams,
+	wtmn
 )
 from .models import (
 	ud
@@ -49,6 +50,22 @@ class PavoObs():
 		self.caldiams = get_diams(self.df)
 
 
+	def t0corr(self,scan):
+
+		ind = self.df.File == scan
+
+		x = np.arange(0,8,0.01)
+		v2_mod = np.sqrt((1 + 0.387*x**2)/(1 + 3.04*x**2 + 2.21*x**4))
+		rat_mod = np.sqrt((1 + 0.322*x**2)/(1 + 9.5*x**2 + 49.8*x**4))
+
+		rat = self.df[ind].corr_v2c/self.df[ind].corr_v2
+		good = self.df[ind].corr_v2sig/self.df[ind].corr_v2 > 1e-5
+		xdata = np.interp(rat,np.flip(rat_mod),np.flip(x))
+
+		x1mu = wtmn(xdata[good]*self.df[ind]['lambda'][good], self.df[ind].corr_v2sig[good]/self.df[ind].corr_v2[good])
+
+		self.df.loc[ind,'corr_v2'] = self.df[ind].corr_v2 / np.interp(x1mu/self.df[ind]['lambda'], x, v2_mod)
+
 
 	def calc_sysv2(self, calscans):
 	    # Calculate system visibility from a set of calibrator scans
@@ -64,8 +81,8 @@ class PavoObs():
 	        exp_v2 = ud(self.df.sp_freq, self.caldiams.loc[star].diameter)
 	    
 	        #System visibility = observed visibility/expected visibility
-	        sysv2 = scan['v2']/exp_v2
-	        sysv2e = scan['v2sig']/exp_v2
+	        sysv2 = scan['corr_v2']/exp_v2
+	        sysv2e = scan['corr_v2sig']/exp_v2
 	        
 	        weighted_sum = weighted_sum.add(sysv2*sysv2e**-2,fill_value=0)
 	        sum_weights = sum_weights.add(sysv2e**-2,fill_value=0)
@@ -83,8 +100,8 @@ class PavoObs():
 	            exp_v2 = ud(self.df.sp_freq, self.caldiams.loc[star].diameter)
 
 	            #System visibility = observed visibility/expected visibility
-	            sysv2 = scan['v2']/exp_v2
-	            sysv2e = scan['v2sig']/exp_v2
+	            sysv2 = scan['corr_v2']/exp_v2
+	            sysv2e = scan['corr_v2sig']/exp_v2
 
 	            mse = mse.add((sysv2 - meansysv2)**2*sysv2e**-2, fill_value=0)
 
@@ -103,12 +120,37 @@ class PavoObs():
 
 		self.calibrated = pd.DataFrame()
 
+		self.df = self.df.assign(corr_v2 = self.df.v2, corr_v2c = self.df.v2c, corr_v2sig = self.df.v2sig)
+
 		for row in config.itertuples():
+			
+			# Apply corrections
+			scans = row.calscans.copy()
+			scans.append(row.targetscans)
+
+			if row.exp is True:
+				for scan in scans:
+					ind = self.df.File == scan
+					self.df.loc[ind,'corr_v2'] = self.df[ind].v2/self.df[ind].v2exp
+					self.df.loc[ind,'corr_v2c'] = self.df[ind].v2c/self.df[ind].v2exp
+					self.df.loc[ind,'corr_v2sig'] = self.df[ind].v2sig/self.df[ind].v2exp
+			else:
+				for scan in scans:
+					# Need to reset corrected visibilities in case they were set by a previous bracket
+					ind = self.df.File == scan
+					self.df.loc[ind,'corr_v2'] = self.df[ind].v2
+					self.df.loc[ind,'corr_v2c'] = self.df[ind].v2c
+					self.df.loc[ind,'corr_v2sig'] = self.df[ind].v2sig
+
+			if row.t0 is True:
+				for scan in scans:
+					self.t0corr(scan)
+
 			sys_v2, sys_v2sig = self.calc_sysv2(row.calscans)
 
 			result = self.df[self.df.File == row.targetscans].reset_index()
-			result = result.assign(cal_v2 = result.v2 / sys_v2)
-			result = result.assign(cal_v2sig = np.abs(result.cal_v2*((result.v2sig/result.v2)**2 + (sys_v2sig/sys_v2)**2)**0.5))
+			result = result.assign(cal_v2 = result.corr_v2 / sys_v2)
+			result = result.assign(cal_v2sig = np.abs(result.cal_v2*((result.corr_v2sig/result.corr_v2)**2 + (sys_v2sig/sys_v2)**2)**0.5))
 
 			self.calibrated = pd.concat([self.calibrated,result])
 

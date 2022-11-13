@@ -113,3 +113,7 @@ def get_diams(df):
 		vk_diams.append(thetaLD)
 
 	return pd.DataFrame({'star': df.Star.unique(), 'diameter': vk_diams}).set_index('star')
+
+def wtmn(x, sigx):
+
+    return (x*sigx**-2).agg('sum')/(sigx**-2).agg('sum')
