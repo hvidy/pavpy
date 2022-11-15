@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib
 from matplotlib import pyplot as plt
+import scipy.optimize as optimization
 
 from .utils import (
 	get_uv,
@@ -156,6 +157,15 @@ class PavoObs():
 			result = result.query('wl > '+str(row.wl_min)+' and wl < '+str(row.wl_max))
 
 			self.calibrated = pd.concat([self.calibrated,result])
+
+	def fit_model(self, model=ud, p0=np.array([1.0])):
+
+		if model is ud:
+			fit  = optimization.curve_fit(ud, self.calibrated.sp_freq, self.calibrated.cal_v2, p0, self.calibrated.cal_v2sig)
+			return fit
+		else:
+			return "This should raise an error"
+
 
 	def plot(
 		self, 
