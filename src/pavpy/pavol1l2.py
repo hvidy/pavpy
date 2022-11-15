@@ -38,14 +38,15 @@ class PavoObs():
 
 	def __init__(self, filename, **kwargs):
 
-		self.df = pd.read_fwf(filename, skiprows=1, names=['Star','Scan','JD','CHARA_num','lambda','v2',
+		self.df = pd.read_fwf(filename, skiprows=1, names=['Star','Scan','JD','CHARA_num','wl','v2',
 			'v2c','v2sig','v2exp','flux','T1','T2','File'], infer_nrows=2000)
 
 		self.filenames = self.df.File.unique()
 
 		self.baselines = get_uv(self.df)
 
-		self.df = self.df.assign(sp_freq = self.baselines.loc[self.df.File].bl.values / self.df['lambda'])
+		self.df = self.df.assign(sp_freq = self.baselines.loc[self.df.File].bl.values / self.df.wl,
+			                     pa = self.baselines.loc[self.df.File].pa.values)
 
 		self.caldiams = get_diams(self.df)
 
@@ -62,9 +63,9 @@ class PavoObs():
 		good = self.df[ind].corr_v2sig/self.df[ind].corr_v2 > 1e-5
 		xdata = np.interp(rat,np.flip(rat_mod),np.flip(x))
 
-		x1mu = wtmn(xdata[good]*self.df[ind]['lambda'][good], self.df[ind].corr_v2sig[good]/self.df[ind].corr_v2[good])
+		x1mu = wtmn(xdata[good]*self.df[ind].wl[good], self.df[ind].corr_v2sig[good]/self.df[ind].corr_v2[good])
 
-		self.df.loc[ind,'corr_v2'] = self.df[ind].corr_v2 / np.interp(x1mu/self.df[ind]['lambda'], x, v2_mod)
+		self.df.loc[ind,'corr_v2'] = self.df[ind].corr_v2 / np.interp(x1mu/self.df[ind].wl, x, v2_mod)
 
 
 	def calc_sysv2(self, calscans):
@@ -151,6 +152,8 @@ class PavoObs():
 			result = self.df[self.df.File == row.targetscans].reset_index()
 			result = result.assign(cal_v2 = result.corr_v2 / sys_v2)
 			result = result.assign(cal_v2sig = np.abs(result.cal_v2*((result.corr_v2sig/result.corr_v2)**2 + (sys_v2sig/sys_v2)**2)**0.5))
+
+			result = result.query('wl > '+str(row.wl_min)+' and wl < '+str(row.wl_max))
 
 			self.calibrated = pd.concat([self.calibrated,result])
 
