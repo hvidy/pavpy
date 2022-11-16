@@ -10,7 +10,8 @@ from .utils import (
 	wtmn
 )
 from .models import (
-	ud
+	ud,
+	ld
 )
 
 class PavoObs():
@@ -158,13 +159,52 @@ class PavoObs():
 
 			self.calibrated = pd.concat([self.calibrated,result])
 
-	def fit_model(self, model=ud, p0=np.array([1.0])):
+	def fit_model(self, model=ud, p0=np.array([1.0]), fixed=[False]):
 
-		if model is ud:
-			fit  = optimization.curve_fit(ud, self.calibrated.sp_freq, self.calibrated.cal_v2, p0, self.calibrated.cal_v2sig)
-			return fit
+		if len(fixed) > 1:
+			assert (len(fixed) == len(p0)), "Ambiguous which parameters are to be fixed: p0 and fixed must have same length"
+			assert (len(fixed) > np.sum(fixed)), "At least one parameter must not be fixed"
 		else:
-			return "This should raise an error"
+			assert (fixed[0] is False), "At least one parameter must not be fixed"
+
+		if type(model) is str:
+			if model == 'ud':
+				model = ud
+			if model == 'ld':
+				model = ld
+			else:
+				try:
+					exec('from .models import '+model)
+					model = vars()[model]
+				except ImportError as err:
+					print("Function "+model+" is not implemented in the models module")
+					raise
+
+		if np.sum(fixed) > 0:
+			parameters = 'x'
+			arguments = 'x'
+			for idx,p in enumerate(p0):
+				if fixed[idx] is True:
+					arguments = arguments + ', '+str(p)
+				else:
+					# This will be a variable of the lambda function
+					parameters = parameters + ', a'+str(idx)
+					arguments = arguments + ', a'+str(idx)
+
+			func = eval("lambda "+parameters+": model("+arguments+")",{'model':model})
+
+			p0 = p0[~np.asarray(fixed)]
+		else:
+			func = model
+
+			
+		popt, pcov  = optimization.curve_fit(func, 
+			                                 self.calibrated.sp_freq, 
+			                                 self.calibrated.cal_v2, 
+			                                 p0 = p0, 
+			                                 sigma = self.calibrated.cal_v2sig)
+
+		self.fit = [{'model': func, 'parameters': popt, 'covariance': pcov}]
 
 
 	def plot(
@@ -174,6 +214,8 @@ class PavoObs():
 		column="cal_v2", 
 		xlabel=None,
 		ylabel=None,
+		xlim=(0,3e8),
+		ylim=(0,1),
 		title="",
 		fmt='o',
 		**kwargs,
@@ -205,10 +247,15 @@ class PavoObs():
 		else:
 			ax.plot(x,y, **kwargs)
 
+		if 'fit' in self.__dict__:
+			x = np.linspace(1e-8,xlim[1],num=100)
+			for fit in self.fit:
+				plt.plot(x, fit['model'](x, *fit['parameters']))
+
 		ax.set_xlabel(xlabel)
 		ax.set_ylabel(ylabel)
 
-		ax.set_xlim(0,3e8)
-		ax.set_ylim(0,1)
+		ax.set_xlim(xlim)
+		ax.set_ylim(ylim)
 
 		return ax
