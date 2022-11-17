@@ -159,7 +159,7 @@ class PavoObs():
 
 			self.calibrated = pd.concat([self.calibrated,result])
 
-	def fit_model(self, model=ud, p0=np.array([1.0]), fixed=[False]):
+	def fit_model(self, model=ud, p0=np.array([1.0]), fixed=[False], individual=False):
 
 		if len(fixed) > 1:
 			assert (len(fixed) == len(p0)), "Ambiguous which parameters are to be fixed: p0 and fixed must have same length"
@@ -197,14 +197,30 @@ class PavoObs():
 		else:
 			func = model
 
+		if individual is False:
 			
-		popt, pcov  = optimization.curve_fit(func, 
-			                                 self.calibrated.sp_freq, 
-			                                 self.calibrated.cal_v2, 
-			                                 p0 = p0, 
-			                                 sigma = self.calibrated.cal_v2sig)
+			popt, pcov  = optimization.curve_fit(func, 
+				                                 self.calibrated.sp_freq, 
+				                                 self.calibrated.cal_v2, 
+				                                 p0 = p0, 
+				                                 sigma = self.calibrated.cal_v2sig)
 
-		self.fit = [{'model': func, 'parameters': popt, 'covariance': pcov}]
+			self.fit = [{'model': func, 'parameters': popt, 'covariance': pcov}]
+
+		else:
+
+			fits = []
+
+			for filename in self.calibrated.File.unique():
+				scan = self.calibrated[self.calibrated.File==filename].reset_index()
+				popt, pcov  = optimization.curve_fit(func, 
+					                                 scan.sp_freq, 
+					                                 scan.cal_v2, 
+					                                 p0 = p0, 
+					                                 sigma = scan.cal_v2sig)
+				fits.append({'model': func, 'parameters': popt, 'covariance': pcov, 'bracket': filename, 'pa': scan.pa[0]})
+
+			self.fit = fits
 
 
 	def plot(
