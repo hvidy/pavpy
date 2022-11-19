@@ -11,7 +11,8 @@ from .utils import (
 )
 from .models import (
 	ud,
-	ld
+	ld,
+	ellipse
 )
 
 class PavoObs():
@@ -170,7 +171,7 @@ class PavoObs():
 		if type(model) is str:
 			if model == 'ud':
 				model = ud
-			if model == 'ld':
+			elif model == 'ld':
 				model = ld
 			else:
 				try:
@@ -222,6 +223,30 @@ class PavoObs():
 
 			self.fit = fits
 
+	def fit_ellipse(self, p0=np.array([0.6,0.5,1.8])):
+
+		if 'fit' not in self.__dict__:
+			raise Exception('Fit individual brackets prior to making xy plot')
+		if 'pa' not in self.fit[0]:
+			raise Exception('Fit individual brackets prior to making xy plot')
+
+		data = pd.DataFrame(self.fit)
+		data = data.assign(radius = data.filter(['parameters']).applymap(lambda x: x[0]/2))
+		data = data.assign(sigrad = data.filter(['covariance']).applymap(lambda x: np.sqrt(np.diag(x))[0]/2))
+		data_reflection = data.copy()
+		data_reflection = data_reflection.assign(pa = data_reflection.pa+180.)
+		data = pd.concat([data,data_reflection],ignore_index=True)
+		data = data.assign(pa = data.pa*np.pi/180)
+		
+
+		popt, pcov  = optimization.curve_fit(ellipse, 
+			                                 data.pa, 
+			                                 data.radius, 
+			                                 p0 = p0, 
+			                                 sigma = data.sigrad)
+
+		self.ellipsefit = {'model': ellipse, 'parameters': popt, 'covariance': pcov}
+
 
 	def plot(
 		self, 
@@ -270,6 +295,47 @@ class PavoObs():
 
 		ax.set_xlabel(xlabel)
 		ax.set_ylabel(ylabel)
+
+		ax.set_xlim(xlim)
+		ax.set_ylim(ylim)
+
+		return ax
+
+	def plotxy(
+		self, 
+		ax=None,
+		xlabel='x (mas)',
+		ylabel='y (mas)',
+		xlim=(-0.6,0.6),
+		ylim=(-0.6,0.6),
+		title="",
+		fmt='C1o',
+		**kwargs,
+	) -> matplotlib.axes.Axes:
+
+		if 'fit' not in self.__dict__:
+			raise Exception('Fit individual brackets prior to making xy plot')
+		if 'pa' not in self.fit[0]:
+			raise Exception('Fit individual brackets prior to making xy plot')
+
+		if ax is None:
+			fig, ax = plt.subplots(1)
+
+		for fit in self.fit:
+			x = 0.5*fit['parameters'][0]*np.cos(fit['pa']*np.pi/180.)
+			y = 0.5*fit['parameters'][0]*np.sin(fit['pa']*np.pi/180.)
+			ax.plot(x,y,fmt)
+			ax.plot(-x,-y,fmt)
+
+		if 'ellipsefit' in self.__dict__:
+			x = np.linspace(0,2*np.pi,num=360)
+			y = self.ellipsefit['model'](x, *self.ellipsefit['parameters'])
+			plt.plot(y*np.cos(x),y*np.sin(x))
+
+		ax.set_xlabel(xlabel)
+		ax.set_ylabel(ylabel)
+
+		ax.set_aspect('equal','box')
 
 		ax.set_xlim(xlim)
 		ax.set_ylim(ylim)
