@@ -5,7 +5,8 @@ from astropy.coordinates import SkyCoord, EarthLocation
 from astropy.time import Time
 import astropy.units as units
 from astroquery.vizier import Vizier
-from dustmaps.bayestar import BayestarWebQuery
+from dustmaps.bayestar import BayestarQuery, BayestarWebQuery
+from scipy.interpolate import griddata
 
 def estimate_theta_vk(vmag,kmag):
     # Calculate angular diameter from Boyajian et al. (2014) relation
@@ -25,8 +26,13 @@ def get_coords(star):
 
 def get_extinction(coords,version='bayestar2015'):
     # Get E(B-V) for a given galactic coordinate
-    bayestar = BayestarWebQuery(version=version)
-    reddening = bayestar(coords, mode='median')
+    try:
+        bayestar = BayestarWebQuery(version=version)
+        reddening = bayestar(coords, mode='median')
+    except:
+        bayestar = BayestarQuery(version=version)
+        reddening = bayestar(coords, mode='median')
+
 
     return reddening
     
@@ -94,26 +100,53 @@ def get_uv(df):
     # return summary
     return summary.filter(['u','v','bl','pa'])
 
-def get_diams(df):
+def get_diams(df, fractional_uncertainty):
 
-	vk_diams = []
+    vk_diams = []
 
-	for star in df.Star.unique():
-		# Get V and K mags from Tycho-2 and 2MASS. Convert Tycho V to Johnson V
-		vmag, kmag = get_vkmags(star)
-		# Get Gaia coordinates and parallax
-		coords = get_coords(star)
-		# Get E(B-V) from Green et al. (2015) dust map
-		ebv = get_extinction(coords)
-		# De-redden V and K magntiudes
-		vmag,kmag = deredden(vmag, kmag, ebv)
-		# Calculate LD diamter from V-K relation of Boyajian et al. 2014
-		thetaLD = estimate_theta_vk(vmag,kmag)
+    for star in df.Star.unique():
+        # Get V and K mags from Tycho-2 and 2MASS. Convert Tycho V to Johnson V
+        vmag, kmag = get_vkmags(star)
+        # Get Gaia coordinates and parallax
+        coords = get_coords(star)
+        # Get E(B-V) from Green et al. (2015) dust map
+        ebv = get_extinction(coords)
+        # De-redden V and K magntiudes
+        vmag,kmag = deredden(vmag, kmag, ebv)
+        # Calculate LD diamter from V-K relation of Boyajian et al. 2014
+        thetaLD = estimate_theta_vk(vmag,kmag)
 
-		vk_diams.append(thetaLD)
+        vk_diams.append(thetaLD)
 
-	return pd.DataFrame({'star': df.Star.unique(), 'diameter': vk_diams}).set_index('star')
+    uncertainty = fractional_uncertainty*np.asarray(vk_diams)
+
+    return pd.DataFrame({'star': df.Star.unique(), 'diameter': vk_diams, 'uncertainty': uncertainty, 'sample_diameter': vk_diams}).set_index('star')
+
+def get_ldcs(teff, logg, wavelengths):
+
+    model_coeffs = pd.read_json('stagger_4term_coeffs.json')
+
+    coeffs = []
+
+    for wavelength in wavelengths:
+        coeff = griddata(model_coeffs.filter(['teff','logg']).values, 
+            np.stack(np.concatenate(model_coeffs.filter([str(wavelength)]).values)), 
+            np.array([teff,logg]), 
+            method='cubic',
+            rescale=True)
+        coeffs.append(coeff[0])
+
+    return pd.DataFrame(coeffs, index= wavelengths, columns = ['a1','a2','a3','a4'])
+
 
 def wtmn(x, sigx):
 
     return (x*sigx**-2).agg('sum')/(sigx**-2).agg('sum')
+
+def randomcorr(covmat):
+
+    evals, evects = np.linalg.eigh(covmat)
+    lin_comb = evects @ np.diag(np.sqrt(evals))
+    random_vector = lin_comb @ np.random.normal(size = evals.shape)
+    
+    return random_vector
