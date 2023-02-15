@@ -7,7 +7,7 @@ license = "GPLv3"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = ">=3.9,<3.12"
 astropy = "5.1.1"
 numpy = "1.23.3"
 scipy = "1.9.1"

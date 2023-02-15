@@ -362,7 +362,7 @@ class PavoObs():
                         'lower': mediandia-lowdia}
 
 
-    def fit_mc(self, iter=1e5, model=ud, p0=np.array([1.0]), fixed=[False]):
+    def fit_mc(self, config, nsamples=1e5, model=ud, p0=np.array([1.0]), fixed=[False], individual=False, wl_sigma = 5e-3):
 
         if len(fixed) > 1:
             assert (len(fixed) == len(p0)), "Ambiguous which parameters are to be fixed: p0 and fixed must have same length"
@@ -400,29 +400,173 @@ class PavoObs():
         else:
             func = model
 
-        # need to consider scaling the uncertainties by the reduced chi squared fit
+        if individual is False:
+            
+            popt, pcov  = optimization.curve_fit(func, 
+                                                 self.calibrated.sp_freq, 
+                                                 self.calibrated.cal_v2, 
+                                                 p0 = p0, 
+                                                 sigma = self.calibrated.cal_v2sig)
 
-        #calibrator diameter error - typically a uniform relative error. should that be calculated earlier?
+            resid = self.calibrated.cal_v2 - func(self.calibrated.sp_freq, *popt)
+            chisq = np.sum((resid/self.calibrated.cal_v2sig)**2)
+            dof = len(self.calibrated) - len(popt)
+            scale = np.sqrt(chisq/dof)
+            print(scale)
 
-        # loop over number of iterations
-            # draw random sample for LD coefficient, wavelengths, calibrator diamters
-            # *calibrate* visibilities using this random sample
-                # need to be able to send calibration function new calibrator diameters, and edit sp.freq for the new wavelengths
+            result=[]
 
-                # then perturb this fit, with random numbers... covariance matrix, multiplied by the reduced chi^2
-                    #add to result array
+            for i in np.arange(np.sqrt(nsamples)):
+                if i % 10 == 0:
+                    print(i)
 
-        # calculate statistics of MC
+                #Perturb calibrator diameters
+                self.caldiams.sample_diameter = self.caldiams.diameter + np.random.normal(size = len(self.caldiams)) * self.caldiams.uncertainty
+                #Perturb wavelength
+                perturbed_wl = self.df.wl.unique() + np.random.normal() * wl_sigma
+                wl_df = pd.DataFrame({'wl': self.df.wl.unique(), 'perturbed_wl': perturbed_wl}).set_index('wl')
+                self.df = self.df.assign(sp_freq_sample = self.baselines.loc[self.df.File].bl.values / wl_df.loc[self.df.wl].perturbed_wl.values)
+                #Perturb ld coefficients
+                #TO-DO
+
+                #Re-Calibrate
+                self.calibrate(config)
+                cal1 = self.calibrated.cal_v2.copy()
+
+                #Fit recalibrated visibiltiies
+                popt, pcov  = optimization.curve_fit(func, 
+                                                     self.calibrated.sp_freq_sample, 
+                                                     self.calibrated.cal_v2, 
+                                                     p0 = p0, 
+                                                     sigma = self.calibrated.cal_v2sig)
+
+                fit = func(self.calibrated.sp_freq_sample, *popt)
+
+                for j in np.arange(np.sqrt(nsamples)):
+                    #Perturb observed visibilites according to the covariance matrix multiplied by reduced chi^2
+                    self.calibrate(config, scale=scale**2)
+                    noise = self.calibrated.cal_v2 - cal1
+                    y2 = fit + noise
+
+                    #Repeat least squares fit
+                    popt, pcov  = optimization.curve_fit(func, 
+                                                         self.calibrated.sp_freq_sample, 
+                                                         y2, 
+                                                         p0 = p0, 
+                                                         sigma = self.calibrated.cal_v2sig)
+
+                    #Store result
+                    result.append(popt)
+
+            #Put things back to normal
+            self.caldiams.sample_diameter = self.caldiams.diameter
+            self.df.sp_freq_sample = self.df.sp_freq
+            self.calibrate(config)
+            self.calibrated.cal_v2sig = self.calibrated.cal_v2sig*scale
+
+            #Diameter samples
+            result = np.asarray(result)
+
+            meanres = np.mean(result, axis=0)
+            sigres = np.std(result, axis=0)
+            lowres,medianres,upres = np.percentile(result,[15.9,50,84.1], axis=0)
 
 
+            self.mcfit = [{'model': func,
+                          'samples': result,
+                          'mean': meanres, 
+                          'std': sigres, 
+                          'median': medianres, 
+                          'upper': upres-medianres, 
+                          'lower': medianres-lowres}]
 
+        else:
 
+            mcfits = []
 
-        # MC has to take into account 
-        #  - measurement uncertainties and covariance,
-        #  - calibrator size uncertainty
-        #  - wavelength calibration uncertainty
-        #  - limb darkening coefficient uncertainty
+            for filename in self.calibrated.File.unique():
+                scan = self.calibrated[self.calibrated.File==filename].reset_index()
+                popt, pcov  = optimization.curve_fit(func, 
+                                                     scan.sp_freq, 
+                                                     scan.cal_v2, 
+                                                     p0 = p0, 
+                                                     sigma = scan.cal_v2sig)
+
+                resid = scan.cal_v2 - func(scan.sp_freq, *popt)
+                chisq = np.sum((resid/scan.cal_v2sig)**2)
+                dof = len(scan) - len(popt)
+                scale = np.sqrt(chisq/dof)
+
+                result=[]
+
+                for i in np.arange(np.sqrt(nsamples)):
+                    if i % 10 == 0:
+                        print(i)
+
+                    #Perturb calibrator diameters
+                    self.caldiams.sample_diameter = self.caldiams.diameter + np.random.normal(size = len(self.caldiams)) * self.caldiams.uncertainty
+                    #Perturb wavelength
+                    perturbed_wl = self.df.wl.unique() + np.random.normal() * wl_sigma
+                    wl_df = pd.DataFrame({'wl': self.df.wl.unique(), 'perturbed_wl': perturbed_wl}).set_index('wl')
+                    self.df = self.df.assign(sp_freq_sample = self.baselines.loc[self.df.File].bl.values / wl_df.loc[self.df.wl].perturbed_wl.values)
+                    #Perturb ld coefficients
+                    #TO-DO
+
+                    #Re-Calibrate
+                    self.calibrate(config)
+                    scan = self.calibrated[self.calibrated.File==filename].reset_index()
+                    cal1 = scan.cal_v2.copy()
+
+                    #Fit recalibrated visibiltiies
+                    popt, pcov  = optimization.curve_fit(func, 
+                                                         scan.sp_freq_sample, 
+                                                         scan.cal_v2, 
+                                                         p0 = p0, 
+                                                         sigma = scan.cal_v2sig)
+
+                    fit = func(scan.sp_freq_sample, *popt)
+
+                    for j in np.arange(np.sqrt(nsamples)):
+                        #Perturb observed visibilites according to the covariance matrix multiplied by reduced chi^2
+                        self.calibrate(config, scale=scale**2)
+                        scan = self.calibrated[self.calibrated.File==filename].reset_index()
+                        noise = scan.cal_v2 - cal1
+                        y2 = fit + noise
+
+                        #Repeat least squares fit
+                        popt, pcov  = optimization.curve_fit(func, 
+                                                             scan.sp_freq_sample, 
+                                                             y2, 
+                                                             p0 = p0, 
+                                                             sigma = scan.cal_v2sig)
+
+                        #Store result
+                        result.append(popt)
+
+                #Put things back to normal
+                self.caldiams.sample_diameter = self.caldiams.diameter
+                self.df.sp_freq_sample = self.df.sp_freq
+                self.calibrate(config)
+                self.calibrated.cal_v2sig = self.calibrated.cal_v2sig*scale
+
+                #Diameter samples
+                result = np.asarray(result)
+
+                meanres = np.mean(result, axis=0)
+                sigres = np.std(result, axis=0)
+                lowres,medianres,upres = np.percentile(result,[15.9,50,84.1], axis=0)
+
+                mcfits.append({'model': func, 
+                    'samples': result,
+                    'mean': meanres,
+                    'std': sigres,
+                    'median': medianres,
+                    'upper': upres-medianres,
+                    'lower': medianres-lowres,
+                    'bracket': filename, 
+                    'pa': scan.pa[0]})
+
+            self.mcfit = mcfits
 
 
     def fit_ellipse(self, p0=np.array([0.6,0.5,1.8])):
@@ -454,7 +598,8 @@ class PavoObs():
         self, 
         ax=None,
         xaxis="sp_freq", 
-        column="cal_v2", 
+        column="cal_v2",
+        caxis="wl",
         xlabel=None,
         ylabel=None,
         xlim=(0,3e8),
@@ -493,7 +638,10 @@ class PavoObs():
 
         if np.any(~np.isnan(yerr)):
             ax.errorbar(x=x, y=y, yerr=yerr, ms=ms, zorder=zorder, capsize=capsize, fmt=fmt, **kwargs)
-            ax.scatter(x,y,c=self.calibrated.wl*1e3, edgecolors='k', cmap=cmap, s=s, zorder=zorder+1)
+            if caxis == 'wl':
+                ax.scatter(x,y,c=self.calibrated.wl*1e3, edgecolors='k', cmap=cmap, s=s, zorder=zorder+1)
+            else:
+                ax.scatter(x,y,c=self.calibrated[caxis], edgecolors='k', cmap=cmap, s=s, zorder=zorder+1)
         else:
             ax.plot(x,y, **kwargs)
 
@@ -510,6 +658,23 @@ class PavoObs():
             ax.add_collection(lines)
             fig.colorbar(lines, label='Wavelength (nm)')
             ax.autoscale()
+
+        elif 'mcfit' in self.__dict__:
+            x = np.linspace(1e-8,xlim[1],num=100)
+            if 'pa' in self.mcfit[0]:
+                ys = []
+                pas = []
+                for fit in self.mcfit:
+                    ys.append(fit['model'](x, *fit['median']))
+                    pas.append(fit['pa'])
+                lines = np.zeros((len(self.mcfit),100,2))
+                lines[:,:,1] = np.asarray(ys)
+                lines[:,:,0] = x
+                z = pas
+                lines = LineCollection(lines, array=z, cmap=cmap)
+                ax.add_collection(lines)
+                fig.colorbar(lines, label='Position angle (deg)')
+                ax.autoscale()
 
         elif 'fit' in self.__dict__:
             x = np.linspace(1e-8,xlim[1],num=100)

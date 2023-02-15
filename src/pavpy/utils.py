@@ -124,7 +124,7 @@ def get_diams(df, fractional_uncertainty):
 
 def get_ldcs(teff, logg, wavelengths):
 
-    model_coeffs = pd.read_json('stagger_4term_coeffs.json')
+    model_coeffs = pd.read_json('src/pavpy/stagger_4term_coeffs.json')
 
     coeffs = []
 
