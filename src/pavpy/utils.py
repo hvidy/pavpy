@@ -7,6 +7,7 @@ import astropy.units as units
 from astroquery.vizier import Vizier
 from dustmaps.bayestar import BayestarQuery, BayestarWebQuery
 from scipy.interpolate import griddata
+import importlib_resources
 
 def estimate_theta_vk(vmag,kmag):
     # Calculate angular diameter from Boyajian et al. (2014) relation
@@ -52,7 +53,7 @@ def get_vkmags(star):
     result = v.query_object(star)
     bt_minus_vt = result[0]['BTmag'][0]-result[0]['VTmag'][0]
     
-    tycho = pd.read_fwf('src/pavpy/Tycho_BV_Bessel2000.dat',skiprows=2, names=['BtVt','VVt','dBV','VHp'])
+    tycho = pd.read_fwf(importlib_resources.files('pavpy') / 'Tycho_BV_Bessel2000.dat',skiprows=2, names=['BtVt','VVt','dBV','VHp'])
     
     vmag = np.interp(bt_minus_vt, tycho.BtVt, tycho.VVt) + result[0]['VTmag'][0]
     
@@ -71,7 +72,7 @@ def get_uv(df):
     lat = chara.lat.radian #Convert latitutde to radians
         
     #Relative location of telescopes
-    tel_locations = pd.read_csv('src/pavpy/tel_locations.txt', delimiter=' ', names=['telname','e_offset','n_offset','z_offset'])
+    tel_locations = pd.read_csv(importlib_resources.files('pavpy') / 'tel_locations.txt', delimiter=' ', names=['telname','e_offset','n_offset','z_offset'])
     tel_locations = tel_locations.set_index('telname')
     
     summary = df.groupby(df.File).first()
@@ -124,7 +125,7 @@ def get_diams(df, fractional_uncertainty):
 
 def get_ldcs(teff, logg, wavelengths):
 
-    model_coeffs = pd.read_json('src/pavpy/stagger_4term_coeffs.json')
+    model_coeffs = pd.read_json(importlib_resources.files('pavpy') / 'stagger_4term_coeffs.json')
 
     coeffs = []
 

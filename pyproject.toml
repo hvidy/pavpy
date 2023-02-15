@@ -1,10 +1,11 @@
 [tool.poetry]
 name = "pavpy"
-version = "0.1.0"
+version = "0.1.2"
 description = "A package for analysing PAVO observations in Python"
 authors = ["Tim White <tim.white@sydney.edu.au>"]
 license = "GPLv3"
 readme = "README.md"
+include = ["src/pavpy/stagger_4term_coeffs.json","src/pavpy/tel_locations.txt","src/papvy/Tycho_BV_Bessel2000.dat"]
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.12"
